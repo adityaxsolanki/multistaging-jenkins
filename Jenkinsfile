@@ -4,80 +4,90 @@ pipeline {
     environment {
     AWS_ACCESS_KEY_ID     = credentials('aws-creds')
     AWS_SECRET_ACCESS_KEY = credentials('aws-creds')
-    TF_ENV = "${env.BRANCH_NAME == 'main' ? 'prod' : 'dev'}"
+    TF_WORKSPACE = 'dev'
     }
 
-    parameters {
-        booleanParam(name: 'DESTROY', defaultValue: false, description: 'Destroy production infrastructure?')
+ parameters {
+    choice(name: 'ENV', choices: ['dev', 'prod'], description: 'Select environment to deploy')
+  }
+
+  stages {
+    stage('Set AWS Credentials') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]) {
+          script {
+            // Now the AWS credentials are available for Terraform commands
+            echo "AWS credentials set for use"
+          }
+        }
+      }
     }
 
-    stages {
-        stage('Checkout') {
-            steps {
-                echo "Branch: ${env.BRANCH_NAME}"
-                checkout scm
-            }
-        }
-
-        stage('Terraform Init') {
-            steps {
-                dir('terraform') {
-                    sh 'terraform init'
-                }
-            }
-        }
-
-        stage('Terraform Validate') {
-            steps {
-                dir('terraform') {
-                    sh 'terraform validate'
-                }
-            }
-        }
-
-        stage('Select Workspace') {
-            steps {
-                dir('terraform') {
-                    script {
-                        sh "terraform workspace select ${TF_ENV} || terraform workspace new ${TF_ENV}"
-                    }
-                }
-            }
-        }
-
-        stage('Terraform Plan') {
-            steps {
-                dir('terraform') {
-                    sh "terraform plan -var='environment=${TF_ENV}'"
-                }
-            }
-        }
-
-        stage('Terraform Apply (Only for main/prod)') {
-            when {
-                branch 'main'
-            }
-            steps {
-                dir('terraform') {
-                    input message: "Apply to production?", ok: "Yes, apply"
-                    sh "terraform apply -auto-approve -var='environment=prod'"
-                }
-            }
-        }
-
-        stage('Terraform Destroy (Manual & Prod Only)') {
-            when {
-                allOf {
-                    branch 'main'
-                    expression { return params.DESTROY == true }
-                }
-            }
-            steps {
-                dir('terraform') {
-                    input message: "Destroy production resources?", ok: "Yes, destroy"
-                    sh "terraform destroy -auto-approve -var='environment=prod'"
-                }
-            }
-        }
+    stage('Checkout') {
+      steps {
+        git branch: 'main', url: 'https://github.com/your/repo.git'
+      }
     }
+
+    stage('Terraform Init') {
+      steps {
+        dir("terraform/${params.ENV}") {
+          withCredentials([
+            string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+            string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+          ]) {
+            sh 'terraform init'
+          }
+        }
+      }
+    }
+
+    stage('Terraform Validate') {
+      steps {
+        dir("terraform/${params.ENV}") {
+          sh 'terraform validate'
+        }
+      }
+    }
+
+    stage('Select Workspace') {
+      steps {
+        dir("terraform/${params.ENV}") {
+          sh """
+            terraform workspace new ${params.ENV} || terraform workspace select ${params.ENV}
+          """
+        }
+      }
+    }
+
+    stage('Terraform Plan') {
+      steps {
+        dir("terraform/${params.ENV}") {
+          sh 'terraform plan -out=tfplan'
+        }
+      }
+    }
+
+    stage('Approval (for prod)') {
+      when {
+        expression { return params.ENV == 'prod' }
+      }
+      steps {
+        timeout(time: 5, unit: 'MINUTES') {
+          input message: "Apply Terraform changes to PROD?"
+        }
+      }
+    }
+
+    stage('Terraform Apply') {
+      steps {
+        dir("terraform/${params.ENV}") {
+          sh 'terraform apply -auto-approve tfplan'
+        }
+      }
+    }
+  }
 }
