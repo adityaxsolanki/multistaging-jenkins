@@ -2,6 +2,10 @@ pipeline {
     agent any
 
     environment {
+    AWS_ACCESS_KEY_ID     = credentials('aws-creds')
+    AWS_SECRET_ACCESS_KEY = credentials('aws-creds')
+  }
+    environment {
         TF_ENV = "${env.BRANCH_NAME == 'main' ? 'prod' : 'dev'}"
     }
 
