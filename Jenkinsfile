@@ -1,44 +1,39 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-    AWS_ACCESS_KEY_ID     = credentials('aws-creds')
-    AWS_SECRET_ACCESS_KEY = credentials('aws-creds')
-    TF_WORKSPACE = 'dev'
-    }
-
- parameters {
+  parameters {
     choice(name: 'ENV', choices: ['dev', 'prod'], description: 'Select environment to deploy')
+  }
+
+  environment {
+    TF_WORKSPACE = 'dev'
   }
 
   stages {
     stage('Set AWS Credentials') {
       steps {
-        withCredentials([
-          string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-          string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
-        ]) {
-          script {
-            // Now the AWS credentials are available for Terraform commands
-            echo "AWS credentials set for use"
-          }
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-creds'
+        ]]) {
+          echo "AWS credentials have been securely set"
         }
       }
     }
 
     stage('Checkout') {
       steps {
-        git branch: 'main', url: 'https://github.com/your/repo.git'
+        git branch: 'main', url: 'https://github.com/adityaxsolanki/multistaging-jenkins.git'
       }
     }
 
     stage('Terraform Init') {
       steps {
         dir("terraform/${params.ENV}") {
-          withCredentials([
-            string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-            string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
-          ]) {
+          withCredentials([[
+            $class: 'AmazonWebServicesCredentialsBinding',
+            credentialsId: 'aws-creds'
+          ]]) {
             sh 'terraform init'
           }
         }
@@ -66,7 +61,12 @@ pipeline {
     stage('Terraform Plan') {
       steps {
         dir("terraform/${params.ENV}") {
-          sh 'terraform plan -out=tfplan'
+          withCredentials([[
+            $class: 'AmazonWebServicesCredentialsBinding',
+            credentialsId: 'aws-creds'
+          ]]) {
+            sh 'terraform plan -out=tfplan'
+          }
         }
       }
     }
@@ -85,7 +85,12 @@ pipeline {
     stage('Terraform Apply') {
       steps {
         dir("terraform/${params.ENV}") {
-          sh 'terraform apply -auto-approve tfplan'
+          withCredentials([[
+            $class: 'AmazonWebServicesCredentialsBinding',
+            credentialsId: 'aws-creds'
+          ]]) {
+            sh 'terraform apply -auto-approve tfplan'
+          }
         }
       }
     }
